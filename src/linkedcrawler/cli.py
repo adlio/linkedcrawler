@@ -2,9 +2,22 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 from .models import CrawlRequest
 from .orchestration import run_linkedin_crawl
+from .sync import sync_profile_to_directory
+
+
+def run_sync(args) -> object:
+    return sync_profile_to_directory(
+        target_url=args.url,
+        directory=args.output_dir,
+        db_path=args.db_path,
+        mode=args.mode,
+        include_reposts=args.include_reposts,
+        author_only=args.author_only,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -14,11 +27,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--max-scroll-rounds', type=int, default=3)
     parser.add_argument('--wait-attempts', type=int, default=10)
     parser.add_argument('--wait-delay-seconds', type=float, default=2.0)
+    parser.add_argument('--output-dir', type=Path, default=None)
+    parser.add_argument('--db-path', type=Path, default=None)
+    parser.add_argument('--mode', choices=['daily', 'backfill'], default='daily')
+    parser.add_argument('--include-reposts', dest='include_reposts', action='store_true', default=True)
+    parser.add_argument('--no-include-reposts', dest='include_reposts', action='store_false')
+    parser.add_argument('--author-only', dest='author_only', action='store_true', default=True)
+    parser.add_argument('--all-activities', dest='author_only', action='store_false')
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
+    if args.output_dir is not None:
+        if args.db_path is None:
+            raise SystemExit('--db-path is required when --output-dir is provided')
+        result = run_sync(args)
+        print(json.dumps(result.to_dict(), indent=2))
+        return 0
+
     request = CrawlRequest(
         url=args.url,
         last_saved_item_key=args.last_saved_item_key,

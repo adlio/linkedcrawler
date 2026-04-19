@@ -53,7 +53,6 @@ class CrawlRequest:
     wait_attempts: int = 10
     wait_delay_seconds: float = 2.0
 
-
 @dataclass(slots=True)
 class CrawlResult:
     request: CrawlRequest
@@ -72,3 +71,25 @@ class CrawlResult:
             "reached_last_saved_item": self.reached_last_saved_item,
             "newest_item_key": self.newest_item_key,
         }
+
+
+@dataclass(slots=True)
+class SyncState:
+    target_profile_url: str
+    newest_seen_activity_urn: str | None = None
+    oldest_seen_activity_urn: str | None = None
+    last_successful_run_at: str | None = None
+    backfill_complete: bool = False
+    last_exported_activity_urn: str | None = None
+    extraction_version: str = '1'
+
+
+@dataclass(slots=True)
+class SyncResult:
+    exported_activity_urns: list[str] = field(default_factory=list)
+    skipped_seen_activity_urns: list[str] = field(default_factory=list)
+    filtered_out_activity_urns: list[str] = field(default_factory=list)
+    stopped_on_seen_streak: bool = False
+
+    def to_dict(self) -> dict:
+        return asdict(self)
