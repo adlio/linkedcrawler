@@ -15,13 +15,15 @@ class CompletedProcessFactory:
     def __init__(self, values: dict[tuple[str, ...], str]):
         self.values = values
         self.calls: list[tuple[str, ...]] = []
+        self.envs: list[dict[str, str] | None] = []
 
-    def __call__(self, args: list[str], check: bool, capture_output: bool, text: bool):
+    def __call__(self, args: list[str], check: bool, capture_output: bool, text: bool, env=None):
         assert check is True
         assert capture_output is True
         assert text is True
         key = tuple(args)
         self.calls.append(key)
+        self.envs.append(env)
         if key not in self.values:
             raise subprocess.CalledProcessError(returncode=1, cmd=args, stderr='missing')
         return subprocess.CompletedProcess(args=args, returncode=0, stdout=self.values[key], stderr='')
@@ -94,6 +96,7 @@ def test_get_linkedin_credentials_reads_secret_tool(monkeypatch: pytest.MonkeyPa
 
     assert credentials == LinkedInCredentials(username='user@example.com', password='hunter2')
     assert len(runner.calls) == 2
+    assert all(env is not None for env in runner.envs)
 
 
 def test_get_linkedin_credentials_raises_clear_error_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
