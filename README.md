@@ -46,6 +46,8 @@ pip install -e '.[dev]'
 
 ```bash
 pytest
+# or
+make test
 ```
 
 ## Run a local crawl
