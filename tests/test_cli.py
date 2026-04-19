@@ -43,6 +43,8 @@ def test_main_uses_sync_mode_when_output_directory_is_provided(tmp_path: Path, m
         str(tmp_path / 'state.sqlite3'),
         '--mode',
         'backfill',
+        '--fetched-at',
+        '2026-04-19',
         '--no-include-reposts',
         '--all-activities',
     ):
@@ -55,6 +57,8 @@ def test_main_uses_sync_mode_when_output_directory_is_provided(tmp_path: Path, m
         'mode': 'backfill',
         'include_reposts': False,
         'author_only': False,
+        'fetched_at': '2026-04-19',
+        'extract_posts': called['extract_posts'],
     }
     payload = json.loads(capsys.readouterr().out)
     assert payload['exported_activity_urns'] == ['urn:li:activity:1']

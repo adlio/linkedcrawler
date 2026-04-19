@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import date
 from pathlib import Path
 
 from .models import CrawlRequest
@@ -17,6 +18,16 @@ def run_sync(args) -> object:
         mode=args.mode,
         include_reposts=args.include_reposts,
         author_only=args.author_only,
+        fetched_at=args.fetched_at,
+        extract_posts=lambda url: run_linkedin_crawl(
+            CrawlRequest(
+                url=url,
+                last_saved_item_key=args.last_saved_item_key,
+                max_scroll_rounds=args.max_scroll_rounds,
+                wait_attempts=args.wait_attempts,
+                wait_delay_seconds=args.wait_delay_seconds,
+            )
+        ).posts,
     )
 
 
@@ -30,6 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--output-dir', type=Path, default=None)
     parser.add_argument('--db-path', type=Path, default=None)
     parser.add_argument('--mode', choices=['daily', 'backfill'], default='daily')
+    parser.add_argument('--fetched-at', default=str(date.today()))
     parser.add_argument('--include-reposts', dest='include_reposts', action='store_true', default=True)
     parser.add_argument('--no-include-reposts', dest='include_reposts', action='store_false')
     parser.add_argument('--author-only', dest='author_only', action='store_true', default=True)

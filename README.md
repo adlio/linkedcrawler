@@ -52,15 +52,46 @@ make test
 
 ## Run a local crawl
 
+Legacy raw crawl JSON:
+
 ```bash
 linkedcrawler 'https://www.linkedin.com/in/<profile>/recent-activity/all/'
 ```
+
+Historical/backfill sync into an Obsidian directory:
+
+```bash
+linkedcrawler \
+  'https://www.linkedin.com/in/simonwardley/recent-activity/all/' \
+  --output-dir "$HOME/Notes/adlio/Resources/AIThinkers/SimonWardley/linkedin-posts" \
+  --db-path "$HOME/Repos/linkedincrawler/data/simonwardley-sync.sqlite3" \
+  --mode backfill \
+  --fetched-at 2026-04-19
+```
+
+Daily incremental sync:
+
+```bash
+linkedcrawler \
+  'https://www.linkedin.com/in/simonwardley/recent-activity/all/' \
+  --output-dir "$HOME/Notes/adlio/Resources/AIThinkers/SimonWardley/linkedin-posts" \
+  --db-path "$HOME/Repos/linkedincrawler/data/simonwardley-sync.sqlite3" \
+  --mode daily \
+  --fetched-at $(date +%F)
+```
+
+Defaults for sync mode:
+- `--author-only` is enabled by default
+- `--include-reposts` is enabled by default
+- this matches the current Simon Wardley policy: authored posts plus Simon reposts
+- note identity is versioned by `activity URN + normalized content hash`, so content edits produce a new note version
 
 Notes:
 
 - A real run requires a locally usable Chrome/Chromium environment compatible with Botasaurus.
 - LinkedIn may still require an authenticated session and may block or challenge automation.
 - The package is intentionally not coupled to the old server/dashboard/task pipeline.
+- The current live crawl still appears constrained by what LinkedIn exposes on the loaded activity page in headless mode; repeated backfills may be needed and the extractor may still need further DOM-specific hardening for full historical coverage.
 
 ## Current limitations
 

@@ -10,3 +10,4 @@ build/
 error_logs/
 output/
 profiles/
+data/
