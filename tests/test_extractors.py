@@ -7,6 +7,8 @@ from linkedcrawler.extractors import extract_all_posts, extract_post, find_video
 FIXTURE_PATH = Path(__file__).parent / 'fixtures' / 'linkedin_feed.html'
 FIXTURE_HTML = FIXTURE_PATH.read_text()
 SOUP = soupify(FIXTURE_HTML)
+REAL_FIXTURE_PATH = Path(__file__).parent / 'fixtures' / 'linkedin_real_activity_page.html'
+REAL_FIXTURE_HTML = REAL_FIXTURE_PATH.read_text()
 
 
 def test_extract_post_from_data_urn() -> None:
@@ -70,6 +72,41 @@ def test_find_video_cdn_urls_deduplicates_matches() -> None:
         ],
     )
     assert urls == ['https://dms.licdn.com/playlist/vid/v2/D4E05AQEsOzrNYKp1RQ/mp4_720p/video.mp4']
+
+
+def test_extract_all_posts_ignores_ember_placeholders_in_real_fixture() -> None:
+    report = extract_all_posts(REAL_FIXTURE_HTML)
+
+    assert [item.post_id for item in report.items] == [
+        'urn:li:activity:7451359540291338241',
+        'urn:li:activity:7451344738600943616',
+        'urn:li:activity:7450896438235942912',
+        'urn:li:activity:7450896189106958336',
+        'urn:li:activity:7450534929064628225',
+    ]
+    assert not report.errors
+
+
+def test_extract_all_posts_only_emits_real_activity_urns_from_real_fixture() -> None:
+    report = extract_all_posts(REAL_FIXTURE_HTML)
+
+    assert report.items
+    assert all(item.post_id.startswith('urn:li:activity:') for item in report.items)
+    assert all(item.post_id.removeprefix('urn:li:activity:').isdigit() for item in report.items)
+    assert all(item.text.strip() for item in report.items)
+
+
+def test_extract_all_posts_keeps_reposts_detectable_in_real_fixture() -> None:
+    report = extract_all_posts(REAL_FIXTURE_HTML)
+
+    reposts = {item.post_id: item for item in report.items if item.is_repost}
+    assert set(reposts) == {
+        'urn:li:activity:7451344738600943616',
+        'urn:li:activity:7450896438235942912',
+        'urn:li:activity:7450896189106958336',
+        'urn:li:activity:7450534929064628225',
+    }
+    assert reposts['urn:li:activity:7451344738600943616'].reposted_by == 'Simon Wardley'
 
 
 def test_matches_linkedin_activity_url() -> None:

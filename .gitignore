@@ -7,3 +7,6 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+error_logs/
+output/
+profiles/

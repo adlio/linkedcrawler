@@ -5,8 +5,10 @@ from collections.abc import Callable, Sequence
 from functools import lru_cache
 from typing import Any, Protocol, cast
 
+from .auth import ensure_linkedin_login
 from .extractors import POST_SELECTORS, extract_all_posts, find_video_cdn_urls, matches_linkedin_activity
 from .models import CrawlRequest, CrawlResult, ExtractionError, LinkedInPost
+from .secrets import get_linkedin_credentials
 
 
 class BrowserSession(Protocol):
@@ -14,6 +16,8 @@ class BrowserSession(Protocol):
     def page_html(self) -> str: ...
     def scroll_to_bottom(self) -> None: ...
     def resource_urls(self) -> Sequence[str]: ...
+    def type(self, selector: str, text: str) -> None: ...
+    def click(self, selector: str) -> None: ...
 
 
 class BotasaurusSessionAdapter:
@@ -30,8 +34,29 @@ class BotasaurusSessionAdapter:
     def scroll_to_bottom(self) -> None:
         self.driver.run_js("window.scrollTo(0, document.body.scrollHeight);")
 
+    def type(self, selector: str, text: str) -> None:
+        self.driver.type(selector, text)
+
+    def type_by_label(self, label: str, text: str) -> None:
+        self.driver.type_by_label(label, text)
+
+    def click(self, selector: str) -> None:
+        self.driver.click(selector)
+
+    def run_js(self, script: str) -> object:
+        return self.driver.run_js(script)
+
+    def click_text(self, text: str) -> None:
+        self.driver.click_element_containing_text(text)
+
     def resource_urls(self) -> Sequence[str]:
-        requests = getattr(self.driver, 'requests', None) or []
+        requests = getattr(self.driver, 'requests', None)
+        if requests is None:
+            return []
+        if callable(requests):
+            requests = requests()
+        if not isinstance(requests, (list, tuple)):
+            return []
         urls: list[str] = []
         for request in requests:
             url = getattr(request, 'url', None)
@@ -125,10 +150,17 @@ def _merge_errors(existing: list, new_errors: list) -> list:
 def _decorated_runner() -> Callable[[CrawlRequest], dict[str, Any]]:
     from botasaurus.browser import browser
 
-    @browser(headless=True, block_images=True, reuse_driver=False)
+    @browser(
+        headless=False,
+        block_images=True,
+        reuse_driver=False,
+        profile='linkedin-crawler',
+        enable_xvfb_virtual_display=True,
+    )
     def _run(driver: Any, request: CrawlRequest) -> dict[str, Any]:
         session = BotasaurusSessionAdapter(driver)
-        return crawl_session(session, request, sleep=lambda _: None).to_dict()
+        ensure_linkedin_login(session, get_linkedin_credentials(), sleep=time.sleep)
+        return crawl_session(session, request, sleep=time.sleep).to_dict()
 
     return _run
 

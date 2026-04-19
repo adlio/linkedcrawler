@@ -150,8 +150,24 @@ def _extract_video_metadata(root: Tag | BeautifulSoup) -> tuple[bool, str, str]:
     return has_video, video_id, video_poster_url
 
 
+def _extract_activity_urn(post: Tag) -> str:
+    value = (post.get('data-urn') or '').strip()
+    return value if re.fullmatch(r'urn:li:activity:\d+', value) else ''
+
+
+def _looks_like_meaningful_activity(post: Tag, *, author: str, text: str, post_date: str, image_urls: list[str], has_video: bool, href: str) -> bool:
+    return any([
+        author.strip(),
+        text.strip(),
+        post_date.strip(),
+        bool(image_urls),
+        has_video,
+        bool(href.strip()),
+    ])
+
+
 def extract_post(post: Tag) -> LinkedInPost | None:
-    post_id = (post.get('data-urn') or post.get('id') or '').strip()
+    post_id = _extract_activity_urn(post)
     if not post_id:
         return None
 
@@ -170,7 +186,18 @@ def extract_post(post: Tag) -> LinkedInPost | None:
     if not post_date:
         post_date = _extract_relative_date(post)
 
+    image_urls = _unique_content_image_urls(post)
     has_video, video_id, video_poster_url = _extract_video_metadata(post)
+    if not _looks_like_meaningful_activity(
+        post,
+        author=author,
+        text=text,
+        post_date=post_date,
+        image_urls=image_urls,
+        has_video=has_video,
+        href=href,
+    ):
+        return None
 
     return LinkedInPost(
         post_id=post_id,
@@ -181,7 +208,7 @@ def extract_post(post: Tag) -> LinkedInPost | None:
         is_repost=is_repost,
         reposted_by=reposted_by,
         text=text,
-        image_urls=_unique_content_image_urls(post),
+        image_urls=image_urls,
         has_video=has_video,
         video_id=video_id,
         video_poster_url=video_poster_url,
@@ -207,13 +234,14 @@ def extract_all_posts(html_or_soup: str | Tag | BeautifulSoup) -> ExtractionRepo
     for index, post in enumerate(collect_all_post_elements(root)):
         item = extract_post(post)
         if item is None:
-            report.errors.append(
-                ExtractionError(
-                    index=index,
-                    selector=' | '.join(POST_SELECTORS),
-                    message='Post element missing data-urn or id attribute',
+            if not ((post.get('data-urn') or '').strip() or (post.get('id') or '').strip()):
+                report.errors.append(
+                    ExtractionError(
+                        index=index,
+                        selector=' | '.join(POST_SELECTORS),
+                        message='Post element missing data-urn or id attribute',
+                    )
                 )
-            )
             continue
         report.items.append(item)
     return report
