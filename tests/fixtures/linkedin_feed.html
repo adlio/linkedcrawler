@@ -1,0 +1,111 @@
+<!-- Post 1: Original post by Simon Wardley with image -->
+<div data-urn="urn:li:activity:7100000000000000001" class="feed-shared-update-v2">
+  <div class="update-components-actor__name">
+    <span aria-hidden="true">Simon Wardley</span>
+  </div>
+  <div class="update-components-actor__sub-description">
+    <a href="/feed/update/urn:li:activity:7100000000000000001/">
+      <time datetime="2025-12-15T10:30:00.000Z">2 days ago</time>
+    </a>
+  </div>
+  <div class="feed-shared-text">
+    Mapping is not about perfection, it is about understanding your landscape. This is a longer
+    second line that provides additional context about the post content and wardley mapping
+    techniques.
+  </div>
+  <div class="feed-shared-image">
+    <img
+      src="https://media.licdn.com/dms/image/v2/D4E10AQGP8abc123/content-photo-shrink_800/content-photo-shrink_800/0/1702900000000?e=2147483647&v=beta&t=abc123"
+    />
+  </div>
+  <img
+    src="https://media.licdn.com/dms/image/v2/profile-displayphoto-shrink_48_48/0/1670000000000?e=2147483647"
+  />
+  <img src="https://media.licdn.com/dms/image/v2/company-logo/shrink_100_100/0/1690000000000" />
+</div>
+
+<!-- Post 2: Repost by Simon Wardley of a post by Another Author -->
+<div data-urn="urn:li:activity:7100000000000000002" class="feed-shared-update-v2">
+  <div class="update-components-header__text">Simon Wardley reposted</div>
+  <div class="update-components-actor__name">
+    <span aria-hidden="true">Another Author</span>
+  </div>
+  <div class="update-components-actor__sub-description">
+    <a href="/feed/update/urn:li:activity:7100000000000000002/">
+      <time datetime="2025-12-14T08:00:00.000Z">3 days ago</time>
+    </a>
+  </div>
+  <div class="feed-shared-text">
+    Excited to share our latest research on platform dynamics and ecosystem strategy. The findings
+    challenge conventional thinking about build vs buy decisions.
+  </div>
+</div>
+
+<!-- Post 3: Plain text post, no images -->
+<div data-urn="urn:li:activity:7100000000000000003" class="feed-shared-update-v2">
+  <div class="update-components-actor__name">
+    <span aria-hidden="true">Jane Engineer</span>
+  </div>
+  <a href="https://www.linkedin.com/feed/update/urn:li:activity:7100000000000000003/">
+    <time datetime="2025-12-13T15:45:00.000Z">4 days ago</time>
+  </a>
+  <div class="feed-shared-text">
+    Just finished reading Team Topologies. Highly recommend it for anyone thinking about org design
+    and cognitive load.
+  </div>
+</div>
+
+<!-- Post 5: Post with a video -->
+<div data-urn="urn:li:activity:7100000000000000005" class="feed-shared-update-v2">
+  <div class="update-components-actor__name">
+    <span aria-hidden="true">Video Creator</span>
+  </div>
+  <a href="/feed/update/urn:li:activity:7100000000000000005/">
+    <time datetime="2025-12-12T09:00:00.000Z">5 days ago</time>
+  </a>
+  <div class="feed-shared-text">Check out this video on Wardley Mapping in practice.</div>
+  <div class="update-components-linkedin-video">
+    <video
+      poster="https://media.licdn.com/dms/image/v2/D4E05AQFakeVideoId123/videocover-low/0/1774948955022?e=1776052800"
+    >
+      <source src="https://dms.licdn.com/playlist/vid/v2/abc123/mp4_720p/video.mp4" />
+    </video>
+  </div>
+</div>
+
+<!-- Post 6: New DOM structure (2025+) -->
+<div data-urn="urn:li:activity:7100000000000000006" class="feed-shared-update-v2">
+  <div class="update-components-header__text-view">Simon Wardley reposted this</div>
+  <div class="update-components-actor__container">
+    <div class="update-components-actor__meta">
+      <span class="update-components-actor__title">
+        <span aria-hidden="true">James Duncan</span>
+        <span class="visually-hidden">James Duncan</span>
+      </span>
+      <span class="update-components-actor__description">
+        Technical founder with 25+ years building web infra
+      </span>
+      <span class="update-components-actor__sub-description"> 5d • </span>
+    </div>
+  </div>
+  <div class="feed-shared-text">
+    This post uses the 2025 LinkedIn DOM structure with renamed CSS classes.
+  </div>
+  <div class="update-components-linkedin-video">
+    <div class="video-s-loader">
+      <video
+        class="vjs-tech"
+        src="blob:https://www.linkedin.com/fake-blob-id"
+        poster="https://media.licdn.com/dms/image/v2/D4E05AQEsOzrNYKp1RQ/videocover-low/0/1774948955022?e=1776052800"
+      ></video>
+    </div>
+  </div>
+</div>
+
+<!-- Post 4: Malformed post - missing data-urn and id -->
+<div class="feed-shared-update-v2">
+  <div class="update-components-actor__name">
+    <span aria-hidden="true">Ghost User</span>
+  </div>
+  <div class="feed-shared-text">This post has no identifier and should fail extraction.</div>
+</div>
