@@ -79,6 +79,8 @@ def test_main_preserves_legacy_crawl_json_output_when_sync_flags_absent(monkeypa
 
     with ArgvContext(
         'https://www.linkedin.com/in/simonwardley/recent-activity/all/',
+        '--via',
+        'html',
         '--last-saved-item-key',
         'urn:li:activity:1',
         '--max-scroll-rounds',

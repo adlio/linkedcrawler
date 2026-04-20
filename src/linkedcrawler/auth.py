@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Protocol
 
 from .secrets import LinkedInCredentials
@@ -40,15 +41,26 @@ def ensure_linkedin_login(
     credentials: LinkedInCredentials,
     *,
     sleep: Callable[[float], None] = time.sleep,
+    debug_dir: Path | None = None,
 ) -> None:
+    def dump(label: str, body: str) -> None:
+        if debug_dir is None:
+            return
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        (debug_dir / f'auth-{label}.html').write_text(body)
+
     html = session.page_html()
+    dump('entry', html)
     if _looks_logged_in(html):
+        dump('entry-logged-in', html)
         return
 
     session.get('https://www.linkedin.com/login')
     sleep(5)
     html = session.page_html()
+    dump('login-page', html)
     if not _looks_like_login_form(html):
+        dump('login-form-missing', html)
         return
 
     if hasattr(session, 'run_js'):
@@ -83,3 +95,4 @@ if (btn) btn.click();
         session.type('#password', credentials.password)
         session.click('button[type="submit"]')
     sleep(2)
+    dump('post-submit', session.page_html())
