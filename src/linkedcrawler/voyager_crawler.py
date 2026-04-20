@@ -22,6 +22,7 @@ The critical details:
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.parse
 from functools import lru_cache
@@ -36,6 +37,15 @@ from .voyager_parser import parse_voyager_response
 # rotates on bundle redeploys; override via `query_id=` if/when this stops
 # working.
 DEFAULT_QUERY_ID = 'voyagerFeedDashProfileUpdates.4af00b28d60ed0f1488018948daad822'
+
+# LinkedIn's client bundle names the feed query `voyagerFeedDashProfileUpdates.`
+# followed by a hex hash. The hash rotates whenever the bundle redeploys, so
+# this module prefers one observed live on the page over the constant above.
+_QUERY_ID_RE = re.compile(r'queryId=(voyagerFeedDashProfileUpdates\.[A-Fa-f0-9]+)')
+# Voyager embeds the profileUrn as a comma-separated variable inside the
+# `variables=(...)` URL tuple. The value itself is percent-encoded, so match
+# the encoded form rather than the cleaner unencoded URN.
+_PROFILE_URN_IN_URL_RE = re.compile(r'profileUrn:(urn%3Ali%3Afsd_profile%3A[A-Za-z0-9_-]+)')
 
 
 class VoyagerError(Exception):
@@ -119,15 +129,121 @@ def _build_voyager_url(
     return f'https://www.linkedin.com/voyager/api/graphql?variables=({vars_inner})&queryId={query_id}'
 
 
+def extract_query_id_from_url(url: str) -> str | None:
+    """Pull the feed queryId from a voyager URL, or None if it isn't one.
+
+    Kept separate from the CDP plumbing so it's unit-testable: feed any URL in,
+    get `voyagerFeedDashProfileUpdates.<hash>` out.
+    """
+    m = _QUERY_ID_RE.search(url or '')
+    return m.group(1) if m else None
+
+
+def extract_profile_urn_from_url(url: str) -> str | None:
+    """Decode the profileUrn out of a voyager feed URL's variables tuple.
+
+    LinkedIn URL-encodes the URN (`:` -> `%3A`) inside `variables=(...)`. We
+    look for that exact shape so we don't accidentally match a profileUrn
+    reference in some other endpoint's query string.
+    """
+    m = _PROFILE_URN_IN_URL_RE.search(url or '')
+    return urllib.parse.unquote(m.group(1)) if m else None
+
+
+def observe_voyager_feed_call(
+    driver: Any,
+    *,
+    timeout_seconds: float = 10.0,
+    scroll_interval_seconds: float = 1.5,
+    sleep: Callable[[float], None] = time.sleep,
+) -> tuple[str | None, str | None]:
+    """Watch the tab for a voyager feed call; return (queryId, profileUrn).
+
+    Registers a CDP ResponseReceived handler, scrolls incrementally to trip
+    LinkedIn's IntersectionObserver (which is what normally fires the first
+    feed pagination), and returns values from the first feed URL seen. Either
+    value may be None if not present — caller falls back to defaults.
+
+    Observing the live call gives us both the exact queryId LinkedIn's bundle
+    is using right now AND the profileUrn it resolved for this page, which is
+    more reliable than any DOM-scraping heuristic.
+    """
+    from botasaurus_driver.cdp import network as cdp_network  # noqa: F401
+
+    observed: dict[str, str | None] = {'query_id': None, 'profile_urn': None}
+
+    def _on_response(_request_id: Any, response: Any, _event: Any) -> None:
+        url = getattr(response, 'url', '') or ''
+        if observed['query_id'] is None:
+            query_id = extract_query_id_from_url(url)
+            if query_id:
+                observed['query_id'] = query_id
+                # profileUrn only exists on feed URLs, and only ever grabs from
+                # the same URL that yielded the queryId.
+                observed['profile_urn'] = extract_profile_urn_from_url(url)
+
+    tab = driver._get_driver()._tab  # type: ignore[attr-defined]
+    tab.after_response_received(_on_response)
+
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline and observed['query_id'] is None:
+        try:
+            driver.run_js('window.scrollBy(0, window.innerHeight);')
+        except Exception:
+            break
+        sleep(scroll_interval_seconds)
+
+    return observed['query_id'], observed['profile_urn']
+
+
+def observe_voyager_query_id(
+    driver: Any,
+    *,
+    timeout_seconds: float = 10.0,
+    scroll_interval_seconds: float = 1.5,
+    sleep: Callable[[float], None] = time.sleep,
+) -> str | None:
+    """Back-compat shim: return only the queryId from the first observed call."""
+    query_id, _ = observe_voyager_feed_call(
+        driver,
+        timeout_seconds=timeout_seconds,
+        scroll_interval_seconds=scroll_interval_seconds,
+        sleep=sleep,
+    )
+    return query_id
+
+
 def _extract_profile_urn(driver: Any) -> str:
-    """Pull the target profile URN from the loaded page.
+    """Pull the target profile URN from the loaded page, preferring stable anchors.
 
     Multiple profile URNs are referenced on any page (the viewer's own,
-    suggestions, etc.); the target profile dominates by frequency, so choose
-    the most-referenced URN.
+    suggestions, etc.). Strategies in order of reliability:
+
+      1. A `data-urn="urn:li:fsd_profile:..."` attribute on a profile-card /
+         top-card element — explicitly tied to the page's subject.
+      2. Any `data-urn` with the fsd_profile prefix — still structured data,
+         not a string match.
+      3. Frequency heuristic over the full page HTML — works for prolific
+         profiles but can be wrong on sparse pages.
+
+    The caller may also pass a URN observed from a live voyager feed call;
+    that's preferred over everything here and should be tried first.
     """
     return driver.run_js(
         """
+// Strategy 1: data-urn on an element whose class hints it's the top card
+const candidates = Array.from(document.querySelectorAll('[data-urn^="urn:li:fsd_profile:"]'));
+for (const el of candidates) {
+  const cls = (el.className && typeof el.className === 'string') ? el.className : '';
+  if (cls.includes('top-card') || cls.includes('pv-top') || cls.includes('profile-view')) {
+    return el.getAttribute('data-urn');
+  }
+}
+// Strategy 2: first structured data-urn of any kind
+if (candidates.length > 0) {
+  return candidates[0].getAttribute('data-urn');
+}
+// Strategy 3: frequency heuristic
 const html = document.documentElement.outerHTML;
 const matches = html.match(/urn:li:fsd_profile:[A-Za-z0-9_-]+/g) || [];
 const counts = {};
@@ -307,9 +423,32 @@ def _decorated_runner() -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
         time.sleep(2)
         ensure_linkedin_login(adapter, get_linkedin_credentials())
         time.sleep(3)
-        profile_urn = _extract_profile_urn(driver)
-        if not profile_urn:
-            raise RuntimeError('could not extract profileUrn from page')
+        # Try to discover a fresh queryId + authoritative profileUrn by letting
+        # LinkedIn issue its own first feed call. If the bundle never emits one
+        # (happens when the initial 20 posts render server-side), fall back.
+        requested_query_id = data.get('query_id') or DEFAULT_QUERY_ID
+        observed_query_id: str | None = None
+        observed_profile_urn: str | None = None
+        if data.get('discover_query_id', True):
+            observed_query_id, observed_profile_urn = observe_voyager_feed_call(
+                driver, timeout_seconds=8.0
+            )
+
+        if observed_query_id:
+            print(f'queryId: {observed_query_id} (observed live)', flush=True)
+            query_id = observed_query_id
+        else:
+            print(f'queryId: {requested_query_id} (fallback — no live call seen)', flush=True)
+            query_id = requested_query_id
+
+        if observed_profile_urn:
+            profile_urn = observed_profile_urn
+            print(f'profileUrn: {profile_urn} (from live feed call)', flush=True)
+        else:
+            profile_urn = _extract_profile_urn(driver)
+            if not profile_urn:
+                raise RuntimeError('could not extract profileUrn from page')
+            print(f'profileUrn: {profile_urn} (from DOM heuristic)', flush=True)
 
         # paginate_voyager_feed doesn't know the current page index when it
         # calls its fetcher, so we track the counter here and increment
@@ -326,7 +465,7 @@ def _decorated_runner() -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
         posts = paginate_voyager_feed(
             _fetch_page,
             profile_urn=profile_urn,
-            query_id=data.get('query_id', DEFAULT_QUERY_ID),
+            query_id=query_id,
             max_pages=data.get('max_pages', 200),
             delay_seconds=data.get('delay_seconds', 1.5),
             on_page=lambda i, in_page, total: print(
@@ -343,15 +482,22 @@ def crawl_via_api(
     *,
     max_pages: int = 200,
     delay_seconds: float = 1.5,
-    query_id: str = DEFAULT_QUERY_ID,
+    query_id: str | None = None,
+    discover_query_id: bool = True,
 ) -> list[LinkedInPost]:
-    """Public entry point: launches a browser, authenticates, paginates."""
+    """Public entry point: launches a browser, authenticates, paginates.
+
+    `discover_query_id=True` (the default) asks the runner to observe one live
+    feed call after login and use its queryId. Set `query_id=` explicitly to
+    bypass discovery and pin a specific hash.
+    """
     payload = _decorated_runner()(
         {
             'url': url,
             'max_pages': max_pages,
             'delay_seconds': delay_seconds,
             'query_id': query_id,
+            'discover_query_id': discover_query_id,
         }
     )
     return [LinkedInPost(**p) for p in payload]

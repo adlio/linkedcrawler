@@ -12,11 +12,17 @@ from .state import has_seen_activity, init_db, load_sync_state, record_export, r
 EXTRACTION_VERSION = '1'
 
 
-def _should_include_post(post: LinkedInPost, *, author_only: bool, include_reposts: bool) -> bool:
+def _should_include_post(
+    post: LinkedInPost,
+    *,
+    profile_name: str,
+    author_only: bool,
+    include_reposts: bool,
+) -> bool:
     if author_only:
         if post.is_repost:
-            return include_reposts and post.reposted_by == 'Simon Wardley'
-        return post.author == 'Simon Wardley'
+            return include_reposts and post.reposted_by == profile_name
+        return post.author == profile_name
     if not include_reposts and post.is_repost:
         return False
     return True
@@ -28,6 +34,8 @@ def sync_profile_to_directory(
     directory: Path,
     db_path: Path,
     mode: str,
+    profile_name: str,
+    tags: list[str],
     fetched_at: str = '1970-01-01',
     extract_posts: Callable[[str], list[LinkedInPost]] | None = None,
     seen_streak_limit: int = 2,
@@ -43,7 +51,12 @@ def sync_profile_to_directory(
     )
 
     for post in extractor(target_url):
-        if not _should_include_post(post, author_only=author_only, include_reposts=include_reposts):
+        if not _should_include_post(
+            post,
+            profile_name=profile_name,
+            author_only=author_only,
+            include_reposts=include_reposts,
+        ):
             result.filtered_out_activity_urns.append(post.post_id)
             continue
 
@@ -70,7 +83,13 @@ def sync_profile_to_directory(
             body_hash=body_hash(post),
         )
 
-    written_paths = write_posts_to_directory(exported_posts, directory, fetched_date=fetched_at)
+    written_paths = write_posts_to_directory(
+        exported_posts,
+        directory,
+        fetched_date=fetched_at,
+        profile_name=profile_name,
+        tags=tags,
+    )
     for post, path in zip(exported_posts, written_paths, strict=False):
         record_export(db_path, activity_urn=post.post_id, note_path=str(path), body_hash=body_hash(post))
 

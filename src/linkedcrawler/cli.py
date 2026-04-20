@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from datetime import date
 from pathlib import Path
 
@@ -9,6 +10,36 @@ from .models import CrawlRequest
 from .orchestration import run_linkedin_crawl
 from .sync import sync_profile_to_directory
 from .voyager_crawler import crawl_via_api
+
+
+_PROFILE_SLUG_RE = re.compile(r'/in/([^/?#]+)')
+
+
+def _slug_from_profile_url(url: str) -> str:
+    """Pull the vanity handle out of a LinkedIn profile URL.
+
+    Used as a last-resort default when no explicit --profile-name / --tags is
+    given: better to emit `simonwardley` in a tag and have the user notice than
+    to silently hardcode a single profile.
+    """
+    m = _PROFILE_SLUG_RE.search(url or '')
+    return m.group(1) if m else ''
+
+
+def _resolve_profile_name(args) -> str:
+    if args.profile_name:
+        return args.profile_name
+    slug = _slug_from_profile_url(args.url)
+    # Title-case the slug as a tolerable display-name fallback. The user will
+    # usually want to pass --profile-name "Real Display Name" instead.
+    return slug.replace('-', ' ').replace('_', ' ').title() if slug else ''
+
+
+def _resolve_tags(args) -> list[str]:
+    if args.tags is not None:
+        return [t.strip() for t in args.tags.split(',') if t.strip()]
+    slug = _slug_from_profile_url(args.url)
+    return [slug] if slug else []
 
 
 def _extractor_for(args):
@@ -28,11 +59,20 @@ def _extractor_for(args):
 
 
 def run_sync(args) -> object:
+    profile_name = _resolve_profile_name(args)
+    tags = _resolve_tags(args)
+    if not profile_name:
+        raise SystemExit(
+            '--profile-name is required when syncing (URL did not match '
+            'https://www.linkedin.com/in/<handle>/...)'
+        )
     return sync_profile_to_directory(
         target_url=args.url,
         directory=args.output_dir,
         db_path=args.db_path,
         mode=args.mode,
+        profile_name=profile_name,
+        tags=tags,
         include_reposts=args.include_reposts,
         author_only=args.author_only,
         fetched_at=args.fetched_at,
@@ -59,6 +99,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument('--api-max-pages', type=int, default=200)
     parser.add_argument('--api-delay-seconds', type=float, default=1.5)
+    parser.add_argument(
+        '--profile-name',
+        default=None,
+        help='display name for frontmatter author fallback and author_only filter. '
+        'Defaults to a title-cased URL slug.',
+    )
+    parser.add_argument(
+        '--tags',
+        default=None,
+        help='comma-separated frontmatter tags. Defaults to the URL slug as a single tag.',
+    )
     parser.add_argument('--include-reposts', dest='include_reposts', action='store_true', default=True)
     parser.add_argument('--no-include-reposts', dest='include_reposts', action='store_false')
     parser.add_argument('--author-only', dest='author_only', action='store_true', default=True)

@@ -46,8 +46,8 @@ def post_filename(post: LinkedInPost) -> str:
     return f'{published}-{stem}.md' if published else f'{stem}.md'
 
 
-def _description(post: LinkedInPost) -> str:
-    source = post.text.strip() or post.title.strip() or 'LinkedIn post by Simon Wardley'
+def _description(post: LinkedInPost, *, profile_name: str) -> str:
+    source = post.text.strip() or post.title.strip() or f'LinkedIn post by {profile_name}'
     trimmed = ' '.join(source.split())
     if len(trimmed) <= 180:
         return trimmed
@@ -55,12 +55,18 @@ def _description(post: LinkedInPost) -> str:
     return f'{shortened}...'
 
 
-def render_post_markdown(post: LinkedInPost, *, fetched_date: str) -> str:
+def render_post_markdown(
+    post: LinkedInPost,
+    *,
+    fetched_date: str,
+    profile_name: str,
+    tags: list[str],
+) -> str:
     lines = [
         '---',
         f'title: "{(post.title or post.text[:100] or post.post_id).replace("\"", "\\\"")}"',
         f'source: "{post.post_url}"',
-        f'author: "{post.author or "Simon Wardley"}"',
+        f'author: "{post.author or profile_name}"',
         'content_type: "linkedin-post"',
     ]
     published = _published_date(post)
@@ -70,10 +76,15 @@ def render_post_markdown(post: LinkedInPost, *, fetched_date: str) -> str:
         [
             f'fetched: {fetched_date}',
             f'body_hash: "{body_hash(post)}"',
-            f'description: "{_description(post).replace("\"", "\\\"")}"',
-            'tags:',
-            '  - "ai-thinkers"',
-            '  - "simon-wardley"',
+            f'description: "{_description(post, profile_name=profile_name).replace("\"", "\\\"")}"',
+        ]
+    )
+    if tags:
+        lines.append('tags:')
+        for tag in tags:
+            lines.append(f'  - "{tag}"')
+    lines.extend(
+        [
             '---',
             '',
             post.text.strip() or post.title.strip() or post.post_url,
@@ -93,11 +104,25 @@ def render_post_markdown(post: LinkedInPost, *, fetched_date: str) -> str:
     return '\n'.join(lines).rstrip() + '\n'
 
 
-def write_posts_to_directory(posts: list[LinkedInPost], directory: Path, *, fetched_date: str) -> list[Path]:
+def write_posts_to_directory(
+    posts: list[LinkedInPost],
+    directory: Path,
+    *,
+    fetched_date: str,
+    profile_name: str,
+    tags: list[str],
+) -> list[Path]:
     directory.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     for post in posts:
         path = directory / post_filename(post)
-        path.write_text(render_post_markdown(post, fetched_date=fetched_date))
+        path.write_text(
+            render_post_markdown(
+                post,
+                fetched_date=fetched_date,
+                profile_name=profile_name,
+                tags=tags,
+            )
+        )
         written.append(path)
     return written

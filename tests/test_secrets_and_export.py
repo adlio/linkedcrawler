@@ -154,7 +154,12 @@ def test_ensure_linkedin_login_skips_when_already_logged_in() -> None:
 
 
 def test_render_post_markdown_formats_obsidian_note(sample_post: LinkedInPost) -> None:
-    markdown = render_post_markdown(sample_post, fetched_date='2026-04-18')
+    markdown = render_post_markdown(
+        sample_post,
+        fetched_date='2026-04-18',
+        profile_name='Simon Wardley',
+        tags=['ai-thinkers', 'simon-wardley'],
+    )
 
     assert 'title: "How many executives are looking at code level detail"' in markdown
     assert 'source: "https://www.linkedin.com/posts/simonwardley_x-how-many-executives-are-looking-at-code-activity-7426577558827216897-5Y0G"' in markdown
@@ -194,10 +199,11 @@ def test_post_filename_versions_when_content_changes(sample_post: LinkedInPost) 
 
 
 def test_write_posts_to_directory_is_idempotent_for_same_activity_and_content(sample_post: LinkedInPost, tmp_path: Path) -> None:
-    first_written = write_posts_to_directory([sample_post], tmp_path, fetched_date='2026-04-18')
+    kwargs = {'profile_name': 'Simon Wardley', 'tags': ['ai-thinkers', 'simon-wardley']}
+    first_written = write_posts_to_directory([sample_post], tmp_path, fetched_date='2026-04-18', **kwargs)
     retitled = LinkedInPost(**sample_post.to_dict())
     retitled.title = 'Changed title, same content'
-    second_written = write_posts_to_directory([retitled], tmp_path, fetched_date='2026-04-19')
+    second_written = write_posts_to_directory([retitled], tmp_path, fetched_date='2026-04-19', **kwargs)
 
     expected_path = tmp_path / '2026-02-11-activity-7426577558827216897-3a924575d6.md'
     assert first_written == [expected_path]

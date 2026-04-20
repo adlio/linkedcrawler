@@ -7,6 +7,17 @@ from linkedcrawler.sync import SyncResult, sync_profile_to_directory
 
 
 TARGET_URL = 'https://www.linkedin.com/in/simonwardley/recent-activity/all/'
+PROFILE_NAME = 'Simon Wardley'
+TAGS = ['ai-thinkers', 'simon-wardley']
+
+
+def _sync(**kwargs):
+    """Shortcut: inject profile_name/tags so each test doesn't have to repeat them."""
+    return sync_profile_to_directory(
+        profile_name=kwargs.pop('profile_name', PROFILE_NAME),
+        tags=kwargs.pop('tags', TAGS),
+        **kwargs,
+    )
 
 
 def make_post(
@@ -45,7 +56,7 @@ def test_daily_sync_exports_only_new_items_and_stops_after_seen_streak(tmp_path:
         make_post(496),
     ]
 
-    sync_profile_to_directory(
+    _sync(
         target_url=TARGET_URL,
         directory=output_dir,
         db_path=db_path,
@@ -54,7 +65,7 @@ def test_daily_sync_exports_only_new_items_and_stops_after_seen_streak(tmp_path:
         extract_posts=lambda _: [extracted[2], extracted[3]],
     )
 
-    result = sync_profile_to_directory(
+    result = _sync(
         target_url=TARGET_URL,
         directory=output_dir,
         db_path=db_path,
@@ -85,7 +96,7 @@ def test_daily_sync_rerun_is_noop_when_nothing_changed(tmp_path: Path) -> None:
     db_path = tmp_path / 'state.sqlite3'
     extracted = [make_post(500), make_post(499, is_repost=True, reposted_by='Simon Wardley')]
 
-    first = sync_profile_to_directory(
+    first = _sync(
         target_url=TARGET_URL,
         directory=output_dir,
         db_path=db_path,
@@ -94,7 +105,7 @@ def test_daily_sync_rerun_is_noop_when_nothing_changed(tmp_path: Path) -> None:
         extract_posts=lambda _: extracted,
         seen_streak_limit=2,
     )
-    second = sync_profile_to_directory(
+    second = _sync(
         target_url=TARGET_URL,
         directory=output_dir,
         db_path=db_path,
@@ -127,7 +138,7 @@ def test_backfill_sync_resumes_without_duplicates_and_honors_filters(tmp_path: P
         make_post(597, is_repost=True, reposted_by='Another Person'),
     ]
 
-    first = sync_profile_to_directory(
+    first = _sync(
         target_url=TARGET_URL,
         directory=output_dir,
         db_path=db_path,
@@ -135,7 +146,7 @@ def test_backfill_sync_resumes_without_duplicates_and_honors_filters(tmp_path: P
         fetched_at='2026-04-18',
         extract_posts=lambda _: extracted[:1],
     )
-    second = sync_profile_to_directory(
+    second = _sync(
         target_url=TARGET_URL,
         directory=output_dir,
         db_path=db_path,
@@ -158,7 +169,7 @@ def test_backfill_sync_resumes_without_duplicates_and_honors_filters(tmp_path: P
         '2026-04-18-activity-600-53e1e6f829.md',
     ]
 
-    third = sync_profile_to_directory(
+    third = _sync(
         target_url=TARGET_URL,
         directory=output_dir,
         db_path=db_path,

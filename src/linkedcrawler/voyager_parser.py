@@ -121,7 +121,9 @@ def _update_to_post(
     is_repost = bool(header_text) and 'reposted this' in header_text.lower()
     if is_repost:
         m = _REPOSTED_BY_RE.match(header_text)
-        reposted_by = m.group(1).strip() if m else 'Simon Wardley'
+        # Defensive fallback for unusual phrasings: keep whatever the header
+        # said rather than hardcoding a specific profile name.
+        reposted_by = m.group(1).strip() if m else header_text.strip()
     else:
         reposted_by = ''
 

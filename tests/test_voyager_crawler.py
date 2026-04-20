@@ -13,6 +13,7 @@ import json
 import pytest
 
 from linkedcrawler.voyager_crawler import (
+    DEFAULT_QUERY_ID,
     VoyagerAuthError,
     VoyagerError,
     VoyagerQueryIdError,
@@ -22,6 +23,8 @@ from linkedcrawler.voyager_crawler import (
     _extract_profile_urn,
     _fetch_with_retry,
     classify_voyager_response,
+    extract_profile_urn_from_url,
+    extract_query_id_from_url,
     paginate_voyager_feed,
 )
 
@@ -350,6 +353,62 @@ def test_extract_profile_urn_returns_driver_js_result() -> None:
 def test_extract_profile_urn_returns_none_when_driver_finds_nothing() -> None:
     driver = _ProfileUrnStubDriver(None)
     assert _extract_profile_urn(driver) is None
+
+
+# ---------------------------------------------------------------------------
+# extract_query_id_from_url
+# ---------------------------------------------------------------------------
+
+def test_extract_query_id_from_feed_url() -> None:
+    url = (
+        'https://www.linkedin.com/voyager/api/graphql?variables=(count:20,start:20)'
+        '&queryId=voyagerFeedDashProfileUpdates.4af00b28d60ed0f1488018948daad822'
+    )
+    assert (
+        extract_query_id_from_url(url)
+        == 'voyagerFeedDashProfileUpdates.4af00b28d60ed0f1488018948daad822'
+    )
+
+
+def test_extract_query_id_ignores_non_feed_voyager_urls() -> None:
+    # Messaging and identity queryIds have the same shape but different prefix;
+    # we only care about the profile-updates feed.
+    messaging_url = (
+        'https://www.linkedin.com/voyager/api/graphql?'
+        'queryId=messengerConversations.9501074288a12f3ae9e3c7ea243bccbf'
+    )
+    assert extract_query_id_from_url(messaging_url) is None
+
+
+def test_extract_query_id_handles_empty_and_malformed_urls() -> None:
+    assert extract_query_id_from_url('') is None
+    assert extract_query_id_from_url('not a url') is None
+    assert extract_query_id_from_url('https://www.linkedin.com/feed/') is None
+
+
+def test_extract_profile_urn_from_feed_url() -> None:
+    url = (
+        'https://www.linkedin.com/voyager/api/graphql?variables=(count:20,start:20,'
+        'profileUrn:urn%3Ali%3Afsd_profile%3AACoAAAAMdmABJzOgMdp87Sult7wsvr-uY-ZW3l4,'
+        'paginationToken:abc)&queryId=voyagerFeedDashProfileUpdates.hash'
+    )
+    assert (
+        extract_profile_urn_from_url(url)
+        == 'urn:li:fsd_profile:ACoAAAAMdmABJzOgMdp87Sult7wsvr-uY-ZW3l4'
+    )
+
+
+def test_extract_profile_urn_returns_none_when_not_present() -> None:
+    url_without = 'https://www.linkedin.com/voyager/api/graphql?queryId=messengerConversations.abc'
+    assert extract_profile_urn_from_url(url_without) is None
+    assert extract_profile_urn_from_url('') is None
+
+
+def test_default_query_id_has_expected_prefix() -> None:
+    # Sanity check that the constant stays aligned with what the extractor
+    # looks for — if someone updates DEFAULT_QUERY_ID to a different shape
+    # the observe/fallback plumbing would silently stop agreeing.
+    assert DEFAULT_QUERY_ID.startswith('voyagerFeedDashProfileUpdates.')
 
 
 # ---------------------------------------------------------------------------
