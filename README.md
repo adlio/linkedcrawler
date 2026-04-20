@@ -93,6 +93,39 @@ Notes:
 - The package is intentionally not coupled to the old server/dashboard/task pipeline.
 - The current live crawl still appears constrained by what LinkedIn exposes on the loaded activity page in headless mode; repeated backfills may be needed and the extractor may still need further DOM-specific hardening for full historical coverage.
 
+## Diagnostics and inspection
+
+The Makefile wraps the common feedback loop used when iterating on crawl reach, DOM selectors, or auth issues. All wrappers default to the newest matching directory when `DIR=` is omitted.
+
+Run a diag crawl (HTML snapshots, events, and a one-line score appended to `output/diag/scoreboard.tsv`):
+
+```bash
+make diag                                  # Simon Wardley's profile
+make diag URL=https://www.linkedin.com/in/<handle>/recent-activity/all/
+make diag ROUNDS=10 DELAY=3                # tune scroll rounds / wait seconds
+```
+
+Inspect a diag run — per-round HTML size + unique `urn:li:activity:` counts, `events.jsonl`, `summary.json`, and the tail of `stdout.log`:
+
+```bash
+make inspect-diag
+make inspect-diag DIR=output/diag/<timestamp>
+```
+
+Inspect the sync database — tables + row counts for `seen_activities`, `exported_notes`, `crawl_runs`:
+
+```bash
+make db-stats
+make db-stats DB=data/simonwardley-sync.sqlite3
+```
+
+Inspect an error_logs dump — tail of `error.log` plus `page.html` heuristics (title, size, activity-URN count, auth/captcha markers):
+
+```bash
+make inspect-error
+make inspect-error DIR=error_logs/<timestamp>
+```
+
 ## Current limitations
 
 - No guaranteed production LinkedIn end-to-end test in CI
