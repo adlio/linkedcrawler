@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 
 from .models import SyncState
@@ -49,6 +50,13 @@ def init_db(db_path: Path | str) -> None:
                 target_profile_url TEXT NOT NULL,
                 mode TEXT NOT NULL,
                 run_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS crawl_checkpoints (
+                target_profile_url TEXT PRIMARY KEY,
+                last_start INTEGER NOT NULL,
+                last_token TEXT NOT NULL,
+                updated_at REAL NOT NULL
             );
             """
         )
@@ -171,3 +179,64 @@ def record_export(db_path: Path | str, *, activity_urn: str, note_path: str, bod
 
 def _activity_sort_key(activity_urn: str) -> int:
     return int(activity_urn.removeprefix('urn:li:activity:'))
+
+
+def save_crawl_checkpoint(
+    db_path: Path | str,
+    target_url: str,
+    *,
+    start: int,
+    token: str,
+    now: float | None = None,
+) -> None:
+    """Persist pagination position so an interrupted crawl can resume."""
+    init_db(db_path)
+    updated_at = time.time() if now is None else now
+    with _connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO crawl_checkpoints (target_profile_url, last_start, last_token, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(target_profile_url) DO UPDATE SET
+                last_start=excluded.last_start,
+                last_token=excluded.last_token,
+                updated_at=excluded.updated_at
+            """,
+            (target_url, start, token, updated_at),
+        )
+
+
+def load_crawl_checkpoint(
+    db_path: Path | str,
+    target_url: str,
+    *,
+    max_age_seconds: float = 3600.0,
+    now: float | None = None,
+) -> tuple[int, str] | None:
+    """Return (start, token) for a checkpoint newer than `max_age_seconds`.
+
+    Checkpoints older than the threshold are treated as stale — LinkedIn's
+    paginationTokens can expire, and mixing a stale cursor with a fresh
+    bundle's queryId is a fast path to "CSRF check failed" / empty responses.
+    """
+    init_db(db_path)
+    current = time.time() if now is None else now
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT last_start, last_token, updated_at FROM crawl_checkpoints WHERE target_profile_url = ?",
+            (target_url,),
+        ).fetchone()
+    if row is None:
+        return None
+    if current - float(row['updated_at']) > max_age_seconds:
+        return None
+    return int(row['last_start']), str(row['last_token'])
+
+
+def clear_crawl_checkpoint(db_path: Path | str, target_url: str) -> None:
+    init_db(db_path)
+    with _connect(db_path) as conn:
+        conn.execute(
+            "DELETE FROM crawl_checkpoints WHERE target_profile_url = ?",
+            (target_url,),
+        )

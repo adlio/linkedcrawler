@@ -214,6 +214,88 @@ def test_paginate_sleeps_between_successful_pages() -> None:
     assert sleeps == [2.25]  # one sleep between the two pages, none after the terminal empty page
 
 
+def test_paginate_stops_when_stop_after_urn_appears_in_page() -> None:
+    # Daily-sync contract: once we hit a URN we've already synced, the
+    # remaining pages are by definition already on disk — no point fetching.
+    pages_served: list[str] = []
+
+    def fetch(url: str) -> dict:
+        pages_served.append(url)
+        if len(pages_served) == 1:
+            return {'status': 200, 'body': _feed_body([9, 8, 7], next_token='tok-a')}
+        if len(pages_served) == 2:
+            # The stop URN lives in this page; pagination must halt here and
+            # NOT issue a third fetch.
+            return {'status': 200, 'body': _feed_body([6, 5, 999], next_token='tok-b')}
+        raise AssertionError('should not have fetched a third page')
+
+    posts = paginate_voyager_feed(
+        fetch,
+        profile_urn='urn:li:fsd_profile:X',
+        stop_after_urn='urn:li:activity:999',
+        sleep=lambda _: None,
+    )
+    assert [p.post_id for p in posts] == [
+        'urn:li:activity:9',
+        'urn:li:activity:8',
+        'urn:li:activity:7',
+        'urn:li:activity:6',
+        'urn:li:activity:5',
+        'urn:li:activity:999',
+    ]
+    assert len(pages_served) == 2
+
+
+def test_paginate_resumes_from_checkpoint_and_emits_checkpoints() -> None:
+    # When resume_from is (60, 'tok-a') the very first fetch should use those
+    # values in its URL, not start=0 / empty token. on_checkpoint fires after
+    # each successful page with the NEXT position so a crash-resume picks up
+    # one page ahead.
+    seen_urls: list[str] = []
+    checkpoints: list[tuple[int, str]] = []
+
+    pages = iter([
+        {'status': 200, 'body': _feed_body([7, 6, 5], next_token='tok-b')},
+        {'status': 200, 'body': _feed_body([4, 3], next_token='tok-c')},
+        {'status': 200, 'body': _feed_body([], next_token=None)},
+    ])
+
+    def fetch(url: str) -> dict:
+        seen_urls.append(url)
+        return next(pages)
+
+    posts = paginate_voyager_feed(
+        fetch,
+        profile_urn='urn:li:fsd_profile:X',
+        resume_from=(60, 'tok-a'),
+        on_checkpoint=lambda start, token: checkpoints.append((start, token)),
+        sleep=lambda _: None,
+    )
+
+    assert len(posts) == 5
+    assert 'start:60' in seen_urls[0]
+    assert 'paginationToken:tok-a' in seen_urls[0]
+    assert 'start:80' in seen_urls[1]
+    assert 'paginationToken:tok-b' in seen_urls[1]
+    # Checkpoint fires for the advance, not for the terminal empty page.
+    assert checkpoints == [(80, 'tok-b'), (100, 'tok-c')]
+
+
+def test_paginate_ignores_stop_after_urn_when_none() -> None:
+    # Sanity check: the existing (no-stop) path still terminates naturally.
+    fetch = _stub_fetch([
+        {'status': 200, 'body': _feed_body([1], next_token='tok')},
+        {'status': 200, 'body': _feed_body([], next_token=None)},
+    ])
+    posts = paginate_voyager_feed(
+        fetch,
+        profile_urn='urn:li:fsd_profile:X',
+        stop_after_urn=None,
+        sleep=lambda _: None,
+    )
+    assert len(posts) == 1
+
+
 def test_paginate_wraps_parse_failure_as_query_id_error() -> None:
     # 200 with a body that parse_voyager_response blows up on — same
     # signature as a rotated queryId serving a surprise payload. The retry

@@ -33,6 +33,10 @@ def body_hash(post: LinkedInPost) -> str:
         post.video_id.strip(),
         post.video_poster_url.strip(),
         '\n'.join(post.video_cdn_urls),
+        post.article_url.strip(),
+        post.article_title.strip(),
+        post.document_url.strip(),
+        post.document_title.strip(),
     ]
     digest = hashlib.sha256('\n'.join(normalized_parts).encode('utf-8')).hexdigest()
     return digest[:10]
@@ -92,6 +96,12 @@ def render_post_markdown(
     )
 
     media_lines: list[str] = []
+    if post.article_url or post.article_title:
+        label = post.article_title or post.article_url
+        media_lines.append(f'- Article: [{label}]({post.article_url})' if post.article_url else f'- Article: {label}')
+    if post.document_url or post.document_title:
+        label = post.document_title or post.document_url
+        media_lines.append(f'- Document: [{label}]({post.document_url})' if post.document_url else f'- Document: {label}')
     for url in post.image_urls:
         media_lines.append(f'- Image: {url}')
     if post.video_poster_url:

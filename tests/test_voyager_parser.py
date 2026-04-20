@@ -223,3 +223,73 @@ def test_video_component_without_metadata_entity_is_ignored() -> None:
     assert posts[0].has_video is False
     assert posts[0].video_id == ''
     assert posts[0].video_cdn_urls == []
+
+
+def test_extracts_article_component_title_and_url() -> None:
+    update = _make_update(7451000000000000060, author='Simon Wardley', text='post with link')
+    update['content'] = {
+        'articleComponent': {
+            'title': {'text': 'The article headline'},
+            'navigationContext': {'actionTarget': 'https://example.com/article'},
+        },
+    }
+    posts, _ = parse_voyager_response(_wrap_feed([update]))
+    assert posts[0].article_title == 'The article headline'
+    assert posts[0].article_url == 'https://example.com/article'
+
+
+def test_article_component_missing_navigation_context_still_captures_title() -> None:
+    update = _make_update(7451000000000000061, author='Simon Wardley', text='text')
+    update['content'] = {'articleComponent': {'title': {'text': 'Only a title'}}}
+    posts, _ = parse_voyager_response(_wrap_feed([update]))
+    assert posts[0].article_title == 'Only a title'
+    assert posts[0].article_url == ''
+
+
+def test_extracts_document_component_pdf_url_and_title() -> None:
+    update = _make_update(7451000000000000070, author='Simon Wardley', text='PDF share')
+    update['content'] = {
+        'documentComponent': {
+            'document': {
+                'title': 'Using Wardley Mapping for Strategy',
+                'transcribedDocumentUrl': 'https://media.licdn.com/docs/my.pdf',
+            },
+        },
+    }
+    posts, _ = parse_voyager_response(_wrap_feed([update]))
+    assert posts[0].document_title == 'Using Wardley Mapping for Strategy'
+    assert posts[0].document_url == 'https://media.licdn.com/docs/my.pdf'
+
+
+def test_document_component_falls_back_to_manifest_url() -> None:
+    update = _make_update(7451000000000000071, author='Simon Wardley', text='PDF share')
+    update['content'] = {
+        'documentComponent': {
+            'document': {
+                'title': 'Fallback doc',
+                # no transcribedDocumentUrl
+                'manifestUrl': 'https://media.licdn.com/docs/manifest.m3u8',
+            },
+        },
+    }
+    posts, _ = parse_voyager_response(_wrap_feed([update]))
+    assert posts[0].document_url == 'https://media.licdn.com/docs/manifest.m3u8'
+
+
+def test_carousel_content_appends_images_to_image_urls() -> None:
+    vector = {
+        'rootUrl': 'https://media.licdn.com/dms/image/v2/CAROUSEL_ASSET/feedshare-shrink_',
+        'artifacts': [
+            {'width': 800, 'fileIdentifyingUrlPathSegment': '800/page1.jpg?t=x'},
+        ],
+    }
+    update = _make_update(7451000000000000080, author='Simon Wardley', text='carousel')
+    update['content'] = {
+        'carouselContent': {
+            'items': [{'attributes': [{'detailData': {'vectorImage': vector}}]}],
+        },
+    }
+    posts, _ = parse_voyager_response(_wrap_feed([update]))
+    assert posts[0].image_urls == [
+        'https://media.licdn.com/dms/image/v2/CAROUSEL_ASSET/feedshare-shrink_800/page1.jpg?t=x',
+    ]

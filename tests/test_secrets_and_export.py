@@ -167,7 +167,7 @@ def test_render_post_markdown_formats_obsidian_note(sample_post: LinkedInPost) -
     assert 'content_type: "linkedin-post"' in markdown
     assert 'published: 2026-02-11' in markdown
     assert 'fetched: 2026-04-18' in markdown
-    assert 'body_hash: "3a924575d6"' in markdown
+    assert 'body_hash: "efc09d013c"' in markdown
     assert 'tags:' in markdown
     assert '- "ai-thinkers"' in markdown
     assert '- "simon-wardley"' in markdown
@@ -182,19 +182,19 @@ def test_body_hash_is_stable_for_title_only_changes(sample_post: LinkedInPost) -
     renamed = LinkedInPost(**sample_post.to_dict())
     renamed.title = 'A completely different title'
 
-    assert body_hash(sample_post) == '3a924575d6'
+    assert body_hash(sample_post) == 'efc09d013c'
     assert body_hash(renamed) == body_hash(sample_post)
 
 
 def test_post_filename_uses_activity_urn_and_content_hash(sample_post: LinkedInPost) -> None:
-    assert post_filename(sample_post) == '2026-02-11-activity-7426577558827216897-3a924575d6.md'
+    assert post_filename(sample_post) == '2026-02-11-activity-7426577558827216897-efc09d013c.md'
 
 
 def test_post_filename_versions_when_content_changes(sample_post: LinkedInPost) -> None:
     revised = LinkedInPost(**sample_post.to_dict())
     revised.text = sample_post.text + ' Revised.'
 
-    assert post_filename(revised) == '2026-02-11-activity-7426577558827216897-ce813bd50d.md'
+    assert post_filename(revised) == '2026-02-11-activity-7426577558827216897-7d49af7f8d.md'
     assert post_filename(revised) != post_filename(sample_post)
 
 
@@ -205,7 +205,7 @@ def test_write_posts_to_directory_is_idempotent_for_same_activity_and_content(sa
     retitled.title = 'Changed title, same content'
     second_written = write_posts_to_directory([retitled], tmp_path, fetched_date='2026-04-19', **kwargs)
 
-    expected_path = tmp_path / '2026-02-11-activity-7426577558827216897-3a924575d6.md'
+    expected_path = tmp_path / '2026-02-11-activity-7426577558827216897-efc09d013c.md'
     assert first_written == [expected_path]
     assert second_written == [expected_path]
     assert expected_path.exists()
@@ -214,4 +214,4 @@ def test_write_posts_to_directory_is_idempotent_for_same_activity_and_content(sa
 
 def test_post_filename_omits_date_when_post_date_missing(sample_post: LinkedInPost) -> None:
     sample_post.post_date = ''
-    assert post_filename(sample_post) == 'activity-7426577558827216897-3a924575d6.md'
+    assert post_filename(sample_post) == 'activity-7426577558827216897-efc09d013c.md'

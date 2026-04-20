@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from linkedcrawler.models import SyncState
 from linkedcrawler.state import (
+    clear_crawl_checkpoint,
     has_seen_activity,
     init_db,
+    load_crawl_checkpoint,
     load_sync_state,
     record_export,
     record_seen_activity,
+    save_crawl_checkpoint,
     update_sync_state,
 )
 
@@ -115,3 +118,38 @@ def test_update_sync_state_round_trips_values_and_record_export_is_idempotent(tm
         note_path='exports/2026-04-18-activity-300-abc.md',
         body_hash='abc',
     )
+
+
+def test_save_and_load_crawl_checkpoint_round_trip(tmp_path) -> None:
+    db_path = tmp_path / 'state.sqlite3'
+    target_url = 'https://www.linkedin.com/in/simonwardley/recent-activity/all/'
+
+    assert load_crawl_checkpoint(db_path, target_url) is None  # empty DB
+
+    save_crawl_checkpoint(db_path, target_url, start=60, token='tok-abc', now=1000.0)
+    loaded = load_crawl_checkpoint(db_path, target_url, now=1500.0)
+    assert loaded == (60, 'tok-abc')
+
+
+def test_load_crawl_checkpoint_returns_none_when_too_old(tmp_path) -> None:
+    # Stale cursors mix badly with freshly-rotated queryIds; treat anything
+    # older than max_age_seconds as absent so a new run starts over cleanly.
+    db_path = tmp_path / 'state.sqlite3'
+    save_crawl_checkpoint(db_path, 'https://x/', start=20, token='tok', now=0.0)
+    assert load_crawl_checkpoint(db_path, 'https://x/', max_age_seconds=3600, now=4000.0) is None
+
+
+def test_clear_crawl_checkpoint_removes_stored_cursor(tmp_path) -> None:
+    db_path = tmp_path / 'state.sqlite3'
+    url = 'https://x/'
+    save_crawl_checkpoint(db_path, url, start=20, token='tok', now=1000.0)
+    clear_crawl_checkpoint(db_path, url)
+    assert load_crawl_checkpoint(db_path, url, now=1001.0) is None
+
+
+def test_save_crawl_checkpoint_overwrites_previous_value(tmp_path) -> None:
+    db_path = tmp_path / 'state.sqlite3'
+    url = 'https://x/'
+    save_crawl_checkpoint(db_path, url, start=20, token='tok-1', now=1000.0)
+    save_crawl_checkpoint(db_path, url, start=40, token='tok-2', now=1100.0)
+    assert load_crawl_checkpoint(db_path, url, now=1101.0) == (40, 'tok-2')

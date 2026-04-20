@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .models import CrawlRequest
 from .orchestration import run_linkedin_crawl
+from .state import load_crawl_checkpoint, load_sync_state, save_crawl_checkpoint
 from .sync import sync_profile_to_directory
 from .voyager_crawler import crawl_via_api
 
@@ -42,15 +43,31 @@ def _resolve_tags(args) -> list[str]:
     return [slug] if slug else []
 
 
-def _extractor_for(args):
+def _extractor_for(args, *, stop_after_urn: str | None = None):
     if args.via == 'api':
+        resume_from: tuple[int, str] | None = None
+        on_checkpoint = None
+        if args.resume and args.db_path:
+            resume_from = load_crawl_checkpoint(args.db_path, args.url)
+
+            def _persist(start: int, token: str) -> None:
+                save_crawl_checkpoint(args.db_path, args.url, start=start, token=token)
+
+            on_checkpoint = _persist
         return lambda url: crawl_via_api(
-            url, max_pages=args.api_max_pages, delay_seconds=args.api_delay_seconds
+            url,
+            max_pages=args.api_max_pages,
+            delay_seconds=args.api_delay_seconds,
+            stop_after_urn=stop_after_urn,
+            resume_from=resume_from,
+            on_checkpoint=on_checkpoint,
         )
     return lambda url: run_linkedin_crawl(
         CrawlRequest(
             url=url,
-            last_saved_item_key=args.last_saved_item_key,
+            # Prefer an explicit --last-saved-item-key, falling back to the
+            # newest URN we already have in sqlite when running in daily mode.
+            last_saved_item_key=args.last_saved_item_key or stop_after_urn,
             max_scroll_rounds=args.max_scroll_rounds,
             wait_attempts=args.wait_attempts,
             wait_delay_seconds=args.wait_delay_seconds,
@@ -66,6 +83,15 @@ def run_sync(args) -> object:
             '--profile-name is required when syncing (URL did not match '
             'https://www.linkedin.com/in/<handle>/...)'
         )
+
+    # Daily sync: let the crawler stop as soon as it sees the newest URN we
+    # already have on disk. Shaves the fetch time from ~2 minutes down to
+    # however long it takes to catch up, and avoids pressuring LinkedIn for
+    # pages we'd throw away at the sqlite dedupe layer anyway.
+    stop_after_urn: str | None = None
+    if args.mode == 'daily':
+        stop_after_urn = load_sync_state(args.db_path, args.url).newest_seen_activity_urn
+
     return sync_profile_to_directory(
         target_url=args.url,
         directory=args.output_dir,
@@ -76,7 +102,7 @@ def run_sync(args) -> object:
         include_reposts=args.include_reposts,
         author_only=args.author_only,
         fetched_at=args.fetched_at,
-        extract_posts=_extractor_for(args),
+        extract_posts=_extractor_for(args, stop_after_urn=stop_after_urn),
     )
 
 
@@ -99,6 +125,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument('--api-max-pages', type=int, default=200)
     parser.add_argument('--api-delay-seconds', type=float, default=1.5)
+    parser.add_argument(
+        '--resume',
+        action='store_true',
+        default=False,
+        help='resume from the saved crawl checkpoint (<1h old) instead of starting over',
+    )
     parser.add_argument(
         '--profile-name',
         default=None,

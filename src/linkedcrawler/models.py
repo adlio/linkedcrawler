@@ -18,6 +18,12 @@ class LinkedInPost:
     video_id: str = ""
     video_poster_url: str = ""
     video_cdn_urls: list[str] = field(default_factory=list)
+    # Link previews (articleComponent) — external article the post references.
+    article_url: str = ""
+    article_title: str = ""
+    # Attached documents (documentComponent) — typically a PDF on LinkedIn's CDN.
+    document_url: str = ""
+    document_title: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)

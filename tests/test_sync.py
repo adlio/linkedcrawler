@@ -83,12 +83,12 @@ def test_daily_sync_exports_only_new_items_and_stops_after_seen_streak(tmp_path:
     )
     written = sorted(path.name for path in output_dir.glob('*.md'))
     assert written == [
-        '2026-04-18-activity-497-d4a6a031ba.md',
-        '2026-04-18-activity-498-d76c96dac4.md',
-        '2026-04-18-activity-499-eb3e796a2a.md',
-        '2026-04-18-activity-500-8ac9399b23.md',
+        '2026-04-18-activity-497-3d929b4dd8.md',
+        '2026-04-18-activity-498-a06b1c7c80.md',
+        '2026-04-18-activity-499-034ebfd1fa.md',
+        '2026-04-18-activity-500-c30fcdc6f7.md',
     ]
-    assert '2026-04-18-activity-496-934a83aa74.md' not in written
+    assert '2026-04-18-activity-496-0f586f4ba3.md' not in written
 
 
 def test_daily_sync_rerun_is_noop_when_nothing_changed(tmp_path: Path) -> None:
@@ -123,8 +123,8 @@ def test_daily_sync_rerun_is_noop_when_nothing_changed(tmp_path: Path) -> None:
         stopped_on_seen_streak=True,
     )
     assert sorted(path.name for path in output_dir.glob('*.md')) == [
-        '2026-04-18-activity-499-eb3e796a2a.md',
-        '2026-04-18-activity-500-8ac9399b23.md',
+        '2026-04-18-activity-499-034ebfd1fa.md',
+        '2026-04-18-activity-500-c30fcdc6f7.md',
     ]
 
 
@@ -165,8 +165,8 @@ def test_backfill_sync_resumes_without_duplicates_and_honors_filters(tmp_path: P
         stopped_on_seen_streak=False,
     )
     assert sorted(path.name for path in output_dir.glob('*.md')) == [
-        '2026-04-18-activity-599-990b0da602.md',
-        '2026-04-18-activity-600-53e1e6f829.md',
+        '2026-04-18-activity-599-2ed17d6233.md',
+        '2026-04-18-activity-600-c27d365851.md',
     ]
 
     third = _sync(

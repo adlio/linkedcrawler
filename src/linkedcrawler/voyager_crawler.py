@@ -355,6 +355,9 @@ def paginate_voyager_feed(
     delay_seconds: float = 1.5,
     sleep: Callable[[float], None] = time.sleep,
     on_page: Callable[[int, int, int], None] | None = None,
+    stop_after_urn: str | None = None,
+    resume_from: tuple[int, str] | None = None,
+    on_checkpoint: Callable[[int, str], None] | None = None,
 ) -> list[LinkedInPost]:
     """Paginate through the voyager feed endpoint and return LinkedInPost objects.
 
@@ -362,13 +365,19 @@ def paginate_voyager_feed(
     VoyagerError subclass. The crawler injects a retry-wrapped driver call;
     tests pass a pure dict-returning stub and skip the network entirely.
 
-    Stops when a page returns zero new posts, the paginationToken doesn't
-    advance, or `max_pages` is reached.
+    Stops when:
+      - a page returns zero new posts,
+      - the paginationToken doesn't advance,
+      - `max_pages` is reached, or
+      - `stop_after_urn` is set and that URN appears in a page (daily-sync
+        short-circuit: we've caught up with previously-synced history).
     """
     all_posts: list[LinkedInPost] = []
     seen: set[str] = set()
-    start = 0
-    token = ''
+    if resume_from is not None:
+        start, token = resume_from
+    else:
+        start, token = 0, ''
 
     for page_i in range(max_pages):
         url = _build_voyager_url(
@@ -397,6 +406,12 @@ def paginate_voyager_feed(
             break
         if not next_token:
             break
+        if stop_after_urn is not None and any(p.post_id == stop_after_urn for p in posts):
+            break
+        # Persist the position we're about to advance to. If the process dies
+        # during the sleep or the next fetch, a resume will pick up here.
+        if on_checkpoint:
+            on_checkpoint(start + 20, next_token)
         token = next_token
         start += 20
         sleep(delay_seconds)
@@ -462,12 +477,18 @@ def _decorated_runner() -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
             finally:
                 page_counter['i'] += 1
 
+        resume_from = data.get('resume_from')  # tuple[int, str] | None
+        on_checkpoint = data.get('on_checkpoint')  # Callable[[int, str], None] | None
+
         posts = paginate_voyager_feed(
             _fetch_page,
             profile_urn=profile_urn,
             query_id=query_id,
             max_pages=data.get('max_pages', 200),
             delay_seconds=data.get('delay_seconds', 1.5),
+            stop_after_urn=data.get('stop_after_urn'),
+            resume_from=resume_from,
+            on_checkpoint=on_checkpoint,
             on_page=lambda i, in_page, total: print(
                 f'voyager page {i:3d}  in_page={in_page:2d}  total={total}', flush=True
             ),
@@ -484,12 +505,23 @@ def crawl_via_api(
     delay_seconds: float = 1.5,
     query_id: str | None = None,
     discover_query_id: bool = True,
+    stop_after_urn: str | None = None,
+    resume_from: tuple[int, str] | None = None,
+    on_checkpoint: Callable[[int, str], None] | None = None,
 ) -> list[LinkedInPost]:
     """Public entry point: launches a browser, authenticates, paginates.
 
     `discover_query_id=True` (the default) asks the runner to observe one live
     feed call after login and use its queryId. Set `query_id=` explicitly to
     bypass discovery and pin a specific hash.
+
+    `stop_after_urn` causes pagination to halt as soon as the given activity
+    URN appears in a response — used by daily sync to avoid refetching history
+    we've already exported.
+
+    `resume_from=(start, token)` + `on_checkpoint` let an interrupted run pick
+    up where it left off. The sqlite-backed versions of these are wired in by
+    the CLI when `--resume` is passed.
     """
     payload = _decorated_runner()(
         {
@@ -498,6 +530,9 @@ def crawl_via_api(
             'delay_seconds': delay_seconds,
             'query_id': query_id,
             'discover_query_id': discover_query_id,
+            'stop_after_urn': stop_after_urn,
+            'resume_from': resume_from,
+            'on_checkpoint': on_checkpoint,
         }
     )
     return [LinkedInPost(**p) for p in payload]

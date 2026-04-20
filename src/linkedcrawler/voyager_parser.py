@@ -129,7 +129,12 @@ def _update_to_post(
 
     content = update.get('content') or {}
     image_urls = _image_urls_from_component(content.get('imageComponent'))
+    # Carousel posts hold multiple images under carouselContent; when present
+    # treat them as image_urls like a regular imageComponent gallery.
+    image_urls.extend(_image_urls_from_carousel(content.get('carouselContent')))
     video_info = _video_info_from_component(content.get('linkedInVideoComponent'), entities_by_urn)
+    article_info = _article_info_from_component(content.get('articleComponent'))
+    document_info = _document_info_from_component(content.get('documentComponent'))
 
     return LinkedInPost(
         post_id=activity_urn,
@@ -145,6 +150,10 @@ def _update_to_post(
         video_id=video_info['id'] if video_info else '',
         video_poster_url=video_info['poster'] if video_info else '',
         video_cdn_urls=video_info['streams'] if video_info else [],
+        article_url=article_info['url'] if article_info else '',
+        article_title=article_info['title'] if article_info else '',
+        document_url=document_info['url'] if document_info else '',
+        document_title=document_info['title'] if document_info else '',
     )
 
 
@@ -174,6 +183,56 @@ def _vector_image_to_url(vector_image: dict[str, Any] | None) -> str:
     if not path:
         return ''
     return f'{root}{path}'
+
+
+def _image_urls_from_carousel(carousel: dict[str, Any] | None) -> list[str]:
+    """carouselContent reuses the same image attribute shape as imageComponent.
+
+    Observed shapes in the wild: `images[]` with `attributes[].detailData.vectorImage`,
+    sometimes a direct `vectorImage` per item. Try both.
+    """
+    if not carousel:
+        return []
+    urls: list[str] = []
+    for item in carousel.get('items') or carousel.get('images') or []:
+        attrs = item.get('attributes') if isinstance(item, dict) else None
+        if attrs:
+            for attr in attrs:
+                vector = ((attr.get('detailData') or {}).get('vectorImage'))
+                url = _vector_image_to_url(vector)
+                if url:
+                    urls.append(url)
+            continue
+        direct = item.get('vectorImage') if isinstance(item, dict) else None
+        url = _vector_image_to_url(direct)
+        if url:
+            urls.append(url)
+    return urls
+
+
+def _article_info_from_component(article: dict[str, Any] | None) -> dict[str, str] | None:
+    """articleComponent (link previews): pull title + external URL."""
+    if not article:
+        return None
+    title = _text_of(article.get('title') or {})
+    url = ((article.get('navigationContext') or {}).get('actionTarget')) or ''
+    if not url and not title:
+        return None
+    return {'title': title, 'url': url}
+
+
+def _document_info_from_component(document_component: dict[str, Any] | None) -> dict[str, str] | None:
+    """documentComponent: typically a PDF hosted on LinkedIn's CDN."""
+    if not document_component:
+        return None
+    doc = document_component.get('document') or {}
+    title = doc.get('title') or ''
+    # Prefer the sanitized PDF URL. Fallback to manifest if LinkedIn stops
+    # serving the former.
+    url = doc.get('transcribedDocumentUrl') or doc.get('manifestUrl') or ''
+    if not title and not url:
+        return None
+    return {'title': title, 'url': url}
 
 
 def _video_info_from_component(
