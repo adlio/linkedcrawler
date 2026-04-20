@@ -38,6 +38,72 @@ from .voyager_parser import parse_voyager_response
 DEFAULT_QUERY_ID = 'voyagerFeedDashProfileUpdates.4af00b28d60ed0f1488018948daad822'
 
 
+class VoyagerError(Exception):
+    """Base class for voyager API failures.
+
+    Subclasses carry enough context to make the failure mode obvious in logs
+    (which page, which status code, a prefix of the body) so an operator can
+    tell the difference between "re-auth needed", "bundle rotated", and
+    "transient network flake" without poking at the raw response.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        page_index: int | None = None,
+        status: int | None = None,
+        body_head: str = '',
+    ) -> None:
+        super().__init__(message)
+        self.page_index = page_index
+        self.status = status
+        self.body_head = body_head
+
+
+class VoyagerAuthError(VoyagerError):
+    """401/403 or a CSRF failure. Not retryable — the session must be refreshed."""
+
+
+class VoyagerRateLimitError(VoyagerError):
+    """429. The caller should back off aggressively."""
+
+
+class VoyagerQueryIdError(VoyagerError):
+    """The queryId rotated (404, or 200 with a non-JSON body). Rediscover it."""
+
+
+class VoyagerTransientError(VoyagerError):
+    """5xx, network blip, or a dict-shaped 200 we couldn't parse. Safe to retry."""
+
+
+def classify_voyager_response(status: int | None, body: str) -> type[VoyagerError] | None:
+    """Return the right exception class for this response, or None if it's OK.
+
+    Kept pure and separate from the fetch loop so error handling can be tested
+    without a browser.
+    """
+    body_lower = (body or '').lstrip().lower()
+    if status == 200:
+        # A 200 without a JSON body usually means LinkedIn served an HTML error
+        # or authwall page — which is what happens when the queryId rotates.
+        if not body_lower.startswith('{'):
+            return VoyagerQueryIdError
+        return None
+    if status in (401, 407):
+        return VoyagerAuthError
+    if status == 403:
+        return VoyagerAuthError
+    if status == 404:
+        # queryId typos / rotations surface as 404 from the voyager backend.
+        return VoyagerQueryIdError
+    if status == 429:
+        return VoyagerRateLimitError
+    if status is None or (500 <= status < 600):
+        return VoyagerTransientError
+    return VoyagerError
+
+
 def _build_voyager_url(
     *,
     profile_urn: str,
@@ -79,13 +145,24 @@ def _fetch_voyager_page(driver: Any, url: str) -> dict[str, Any]:
     """Call fetch(url) from within the authenticated page context.
 
     Botasaurus wraps run_js in an IIFE and awaits returned Promises, so the
-    script returns an async IIFE invocation whose Promise CDP awaits.
+    script returns an async IIFE invocation whose Promise CDP awaits. CSRF
+    extraction tries the cookie first (both quoted and unquoted JSESSIONID
+    forms LinkedIn has used historically), falling back to the page's csrf
+    meta tag when present.
     """
     js_url = json.dumps(url)
     script = f"""
 return (async () => {{
-  const csrfMatch = document.cookie.match(/JSESSIONID=\\"?([^;\\"]+)\\"?/);
-  const csrf = csrfMatch ? csrfMatch[1] : '';
+  let csrf = '';
+  const cookie = document.cookie || '';
+  const quoted = cookie.match(/JSESSIONID="([^"]+)"/);
+  const bare = cookie.match(/JSESSIONID=([^;]+)/);
+  if (quoted) csrf = quoted[1];
+  else if (bare) csrf = bare[1].replace(/^"|"$/g, '');
+  if (!csrf) {{
+    const meta = document.querySelector('meta[name="csrfToken"]');
+    if (meta) csrf = meta.getAttribute('content') || '';
+  }}
   const resp = await fetch({js_url}, {{
     credentials: 'include',
     headers: {{
@@ -95,26 +172,82 @@ return (async () => {{
     }},
   }});
   const text = await resp.text();
-  return {{status: resp.status, body: text}};
+  return {{status: resp.status, body: text, csrf_present: !!csrf}};
 }})();
 """
     return driver.run_js(script)
 
 
-def paginate_voyager_feed(
-    *,
+def _fetch_with_retry(
     driver: Any,
+    url: str,
+    *,
+    page_index: int,
+    max_attempts: int = 3,
+    base_delay_seconds: float = 1.0,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, Any]:
+    """Execute _fetch_voyager_page with exponential backoff on transient errors.
+
+    Transient = network/tab exception, 5xx, or malformed dict return. Auth,
+    rate-limit, and queryId errors propagate immediately — retrying them would
+    just delay the inevitable.
+    """
+    last_transient: VoyagerError | None = None
+    for attempt in range(max_attempts):
+        try:
+            raw = _fetch_voyager_page(driver, url)
+        except Exception as exc:
+            last_transient = VoyagerTransientError(
+                f'fetch threw {type(exc).__name__}: {exc}',
+                page_index=page_index,
+            )
+            if attempt + 1 < max_attempts:
+                sleep(base_delay_seconds * (3 ** attempt))
+                continue
+            raise last_transient from exc
+
+        status = raw.get('status') if isinstance(raw, dict) else None
+        body = (raw.get('body') if isinstance(raw, dict) else '') or ''
+        err_cls = classify_voyager_response(status, body)
+        if err_cls is None:
+            return {'status': status, 'body': body}
+        if err_cls is VoyagerTransientError and attempt + 1 < max_attempts:
+            last_transient = err_cls(
+                f'transient status={status}', page_index=page_index, status=status,
+                body_head=body[:200],
+            )
+            sleep(base_delay_seconds * (3 ** attempt))
+            continue
+        raise err_cls(
+            f'voyager page {page_index} returned status={status}',
+            page_index=page_index,
+            status=status,
+            body_head=body[:200],
+        )
+
+    assert last_transient is not None  # unreachable once loop body ran
+    raise last_transient
+
+
+def paginate_voyager_feed(
+    fetch_page: Callable[[str], dict[str, Any]],
+    *,
     profile_urn: str,
     query_id: str = DEFAULT_QUERY_ID,
     max_pages: int = 200,
     delay_seconds: float = 1.5,
+    sleep: Callable[[float], None] = time.sleep,
     on_page: Callable[[int, int, int], None] | None = None,
 ) -> list[LinkedInPost]:
     """Paginate through the voyager feed endpoint and return LinkedInPost objects.
 
-    Stops when a page returns zero new posts or when `max_pages` is reached.
-    `on_page(page_index, urns_in_page, cumulative_total)` is called after each
-    successful page if provided.
+    `fetch_page(url)` must return `{'status': int, 'body': str}` or raise a
+    VoyagerError subclass. The crawler injects a retry-wrapped driver call;
+    tests pass a pure dict-returning stub and skip the network entirely.
+
+    Stops when a page returns zero new posts, the paginationToken doesn't
+    advance, or `max_pages` is reached.
     """
     all_posts: list[LinkedInPost] = []
     seen: set[str] = set()
@@ -125,12 +258,19 @@ def paginate_voyager_feed(
         url = _build_voyager_url(
             profile_urn=profile_urn, query_id=query_id, start=start, pagination_token=token
         )
-        result = _fetch_voyager_page(driver, url)
-        status = result.get('status') if isinstance(result, dict) else None
-        body = (result.get('body') if isinstance(result, dict) else '') or ''
-        if status != 200:
-            raise RuntimeError(f'voyager page {page_i} returned status={status}: {body[:200]!r}')
-        posts, next_token = parse_voyager_response(body)
+        result = fetch_page(url)
+        body = result.get('body') or ''
+        try:
+            posts, next_token = parse_voyager_response(body)
+        except Exception as exc:
+            # Parser failing on a 200 response means the body shape surprised
+            # us — usually a queryId rotation served a payload we don't grok.
+            raise VoyagerQueryIdError(
+                f'voyager page {page_i} body failed to parse: {type(exc).__name__}: {exc}',
+                page_index=page_i,
+                status=result.get('status'),
+                body_head=body[:200],
+            ) from exc
         new_posts = [p for p in posts if p.post_id not in seen]
         for p in new_posts:
             seen.add(p.post_id)
@@ -143,7 +283,7 @@ def paginate_voyager_feed(
             break
         token = next_token
         start += 20
-        time.sleep(delay_seconds)
+        sleep(delay_seconds)
 
     return all_posts
 
@@ -170,8 +310,21 @@ def _decorated_runner() -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
         profile_urn = _extract_profile_urn(driver)
         if not profile_urn:
             raise RuntimeError('could not extract profileUrn from page')
+
+        # paginate_voyager_feed doesn't know the current page index when it
+        # calls its fetcher, so we track the counter here and increment
+        # post-call. Keeps the retry layer's error messages informative
+        # without exposing the counter in the public API.
+        page_counter = {'i': 0}
+
+        def _fetch_page(url: str) -> dict[str, Any]:
+            try:
+                return _fetch_with_retry(driver, url, page_index=page_counter['i'])
+            finally:
+                page_counter['i'] += 1
+
         posts = paginate_voyager_feed(
-            driver=driver,
+            _fetch_page,
             profile_urn=profile_urn,
             query_id=data.get('query_id', DEFAULT_QUERY_ID),
             max_pages=data.get('max_pages', 200),
