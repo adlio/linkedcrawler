@@ -2,12 +2,16 @@
 
 SHELL := /bin/bash
 
+# All targets below assume `uv` is on PATH (see README for install). `uv sync`
+# creates .venv/ from pyproject.toml + uv.lock with the exact resolved
+# versions; `uv run` executes a command inside that env without needing an
+# explicit `source .venv/bin/activate`.
+
 install:
-	python3 -m venv .venv
-	. .venv/bin/activate && pip install -U pip && pip install -e '.[dev]'
+	uv sync --all-extras
 
 test:
-	. .venv/bin/activate && pytest
+	uv run pytest
 
 # make diag [URL=https://...] [ROUNDS=N] [DELAY=N]
 diag:
@@ -57,7 +61,7 @@ api-probe:
 	  if [ -n "$(SAVE_BODIES)" ]; then flags="$$flags --save-bodies"; fi; \
 	  url="$(URL)"; \
 	  if [ -z "$$url" ]; then url="https://www.linkedin.com/in/simonwardley/recent-activity/all/"; fi; \
-	  . .venv/bin/activate && python scripts/api_probe.py $$url $$flags
+	  uv run python scripts/api_probe.py $$url $$flags
 
 # make inspect-error [DIR=error_logs/<stamp>]  (defaults to newest)
 inspect-error:

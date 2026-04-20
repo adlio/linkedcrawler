@@ -34,49 +34,67 @@ That means:
 - the extraction contract is locked to realistic fixture HTML
 - the orchestration contract is validated with a fake session that simulates scrolling and delayed content
 
+## Prerequisites
+
+- **[uv](https://docs.astral.sh/uv/)** — installs in one line:
+  ```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+  `uv` manages the Python interpreter, the `.venv`, and the locked dependency
+  set (`uv.lock`). The pinned Python version lives in `.python-version`; `uv
+  sync` will fetch it automatically if missing.
+- **A local Chrome/Chromium**, reachable by Botasaurus. Live crawls open a
+  real browser window (or an Xvfb virtual display on Linux headless hosts).
+- **LinkedIn credentials stored via `secret-tool`** (Linux GNOME keyring) under
+  service `linkedin-crawler`, account `default`, kinds `username` / `password`.
+
 ## Installation
 
 ```bash
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -e '.[dev]'
+make install       # or: uv sync --all-extras
 ```
+
+This creates `.venv/` from `uv.lock` with the exact resolved versions. If
+you're migrating from the old pip-based setup, `rm -rf .venv` first — uv's
+venv layout differs from plain `python -m venv`.
 
 ## Run tests
 
 ```bash
-pytest
-# or
-make test
+make test          # or: uv run pytest
 ```
 
 ## Run a local crawl
 
-Legacy raw crawl JSON:
+Raw crawl JSON (no sync, no Obsidian output):
 
 ```bash
-linkedcrawler 'https://www.linkedin.com/in/<profile>/recent-activity/all/'
+uv run linkedcrawler 'https://www.linkedin.com/in/<profile>/recent-activity/all/'
 ```
 
 Historical/backfill sync into an Obsidian directory:
 
 ```bash
-linkedcrawler \
+uv run linkedcrawler \
   'https://www.linkedin.com/in/simonwardley/recent-activity/all/' \
   --output-dir "$HOME/Notes/adlio/Resources/AIThinkers/SimonWardley/linkedin-posts" \
   --db-path "$HOME/Repos/linkedincrawler/data/simonwardley-sync.sqlite3" \
   --mode backfill \
+  --profile-name 'Simon Wardley' \
+  --tags ai-thinkers,simon-wardley \
   --fetched-at 2026-04-19
 ```
 
-Daily incremental sync:
+Daily incremental sync (stops once it hits the newest already-synced URN):
 
 ```bash
-linkedcrawler \
+uv run linkedcrawler \
   'https://www.linkedin.com/in/simonwardley/recent-activity/all/' \
   --output-dir "$HOME/Notes/adlio/Resources/AIThinkers/SimonWardley/linkedin-posts" \
   --db-path "$HOME/Repos/linkedincrawler/data/simonwardley-sync.sqlite3" \
   --mode daily \
+  --profile-name 'Simon Wardley' \
+  --tags ai-thinkers,simon-wardley \
   --fetched-at $(date +%F)
 ```
 

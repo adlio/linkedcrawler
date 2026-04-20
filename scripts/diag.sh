@@ -21,23 +21,22 @@ STAMP="$(date +%Y-%m-%d_%H-%M-%S)"
 DIAG_DIR="output/diag/${STAMP}"
 mkdir -p "${DIAG_DIR}"
 
-if [[ ! -x .venv/bin/linkedcrawler ]]; then
-  echo "error: .venv/bin/linkedcrawler missing — run 'make install' first" >&2
+if ! command -v uv >/dev/null 2>&1; then
+  echo "error: uv not on PATH — see README for install instructions" >&2
   exit 2
 fi
-
-# shellcheck disable=SC1091
-. .venv/bin/activate
 
 STDOUT_LOG="${DIAG_DIR}/stdout.log"
 RAW_OUT="${DIAG_DIR}/raw.json"
 export LINKEDCRAWLER_DEBUG_DIR="${DIAG_DIR}"
 
+# `uv run` auto-syncs .venv/ against uv.lock if needed, so this works on a
+# freshly-cloned machine without a separate install step.
 # shellcheck disable=SC2086
-linkedcrawler "${URL}" ${LINKEDCRAWLER_EXTRA_FLAGS:-} > "${STDOUT_LOG}"
+uv run linkedcrawler "${URL}" ${LINKEDCRAWLER_EXTRA_FLAGS:-} > "${STDOUT_LOG}"
 
 # Botasaurus prints status lines before the JSON; slice from the first '{'.
-python3 -c '
+uv run python -c '
 import json, sys
 text = open(sys.argv[1]).read()
 idx = text.find("{")
@@ -45,7 +44,7 @@ payload = json.loads(text[idx:])
 open(sys.argv[2], "w").write(json.dumps(payload, indent=2))
 ' "${STDOUT_LOG}" "${RAW_OUT}"
 
-read -r posts rounds errors reached newest < <(python3 -c '
+read -r posts rounds errors reached newest < <(uv run python -c '
 import json, sys
 d = json.load(open(sys.argv[1]))
 print(len(d["posts"]), d["rounds_scrolled"], len(d["extraction_errors"]),
